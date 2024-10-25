@@ -13,6 +13,22 @@ import dayjs, { ManipulateType } from 'dayjs'
 import weekOfYear from 'dayjs/plugin/weekOfYear'
 import goldQuotations from './assets/goldBRL.json'
 import { cn } from './lib/utils'
+import axios from 'axios'
+import { redis } from './database/redis'
+
+type Quotation = {
+  code: string
+  codein: string
+  name: string
+  high: string
+  low: string
+  varBid: string
+  pctChange: string
+  bid: string
+  ask: string
+  timestamp: string
+  create_date: string
+}
 
 export function Form() {
   const [quantity, setQuantity] = useState(0)
@@ -21,10 +37,10 @@ export function Form() {
   const [loss, setLoss] = useState(0)
   dayjs.extend(weekOfYear)
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    console.log(quantity, measure)
-    const today = dayjs()
+    const onceWeight = 31.1035
+    // const today = dayjs()
     const quotationDay = dayjs().subtract(quantity, measure)
     const quotations = goldQuotations.map((quote) => {
       const formattedDate = dayjs(quote.date.split('.').reverse().join('-'))
@@ -41,14 +57,37 @@ export function Form() {
       (quote) =>
         quote.year === quotationDay.year() && quote.week === quotationDay.week()
     )
-    const quotationToday = quotations.find(
-      (quote) => quote.year === today.year() && quote.week === today.week()
-    )
+    // const quotationToday = quotations.find(
+    //   (quote) => quote.year === today.year() && quote.week === today.week()
+    // )
 
-    const onceWeight = 31.1035
+    const goldQuoteKey = `XAU-USD-${dayjs().format('YYYY-MM-DD')}`
+    let goldQuote = await redis.get<Quotation>(goldQuoteKey)
 
-    if (quotation && quotationToday) {
-      const quotationDiff = quotationToday?.goldBRL - quotation?.goldBRL
+    if (!goldQuote) {
+      const goldQuoteData = await axios.get(
+        'https://economia.awesomeapi.com.br/json/daily/XAU-USD'
+      )
+      goldQuote = goldQuoteData.data[0]
+      await redis.set(goldQuoteKey, goldQuoteData.data[0])
+    }
+
+    const usdQuoteKey = `USD-BRL-${dayjs().format('YYYY-MM-DD')}`
+    let usdQuote = await redis.get<Quotation>(usdQuoteKey)
+
+    if (!usdQuote) {
+      const usdQuoteData = await axios.get(
+        'https://economia.awesomeapi.com.br/json/daily/USD-BRL'
+      )
+      usdQuote = usdQuoteData.data[0]
+      await redis.set(usdQuoteKey, usdQuoteData.data[0])
+    }
+
+    if (quotation && goldQuote && usdQuote) {
+      const goldBrlToday = Number(goldQuote.bid) * Number(usdQuote.bid)
+      console.log(goldBrlToday)
+
+      const quotationDiff = goldBrlToday - quotation?.goldBRL
       const valuePerGram = quotationDiff / onceWeight
       const loss = valuePerGram * Number(size)
       setLoss(loss)
